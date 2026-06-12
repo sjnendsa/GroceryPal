@@ -1,0 +1,72 @@
+[
+  {
+    "id": "270574",
+    "slug": "baby-care",
+    "name": "Baby Care"
+  },
+  {
+    "id": "30846",
+    "slug": "bakery",
+    "name": "Bakery"
+  },
+  {
+    "id": "31470",
+    "slug": "cleaning-paper-home",
+    "name": "Cleaning Paper Home"
+  },
+  {
+    "id": "30906",
+    "slug": "dairy-eggs",
+    "name": "Dairy Eggs"
+  },
+  {
+    "id": "30726",
+    "slug": "deli-ready-made-meals",
+    "name": "Deli Ready Made Meals"
+  },
+  {
+    "id": "31329",
+    "slug": "floral-and-garden",
+    "name": "Floral And Garden"
+  },
+  {
+    "id": "30949",
+    "slug": "frozen",
+    "name": "Frozen"
+  },
+  {
+    "id": "30681",
+    "slug": "fruits-vegetables",
+    "name": "Fruits Vegetables"
+  },
+  {
+    "id": "31076",
+    "slug": "health-beauty",
+    "name": "Health Beauty"
+  },
+  {
+    "id": "31405",
+    "slug": "international-foods",
+    "name": "International Foods"
+  },
+  {
+    "id": "30791",
+    "slug": "meat-seafood",
+    "name": "Meat Seafood"
+  },
+  {
+    "id": "31475",
+    "slug": "pantry",
+    "name": "Pantry"
+  },
+  {
+    "id": "31016",
+    "slug": "pet-care",
+    "name": "Pet Care"
+  },
+  {
+    "id": "32100",
+    "slug": "plant-based-non-dairy",
+    "name": "Plant Based Non Dairy"
+  }
+]

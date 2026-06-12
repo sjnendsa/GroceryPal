@@ -1,0 +1,6 @@
+requests>=2.31.0
+flask>=3.0.0
+schedule>=1.2.0
+# For harvesting category IDs from the live site (scraper.py --refresh-categories).
+# Also run once after install:  playwright install chromium
+playwright>=1.42.0
