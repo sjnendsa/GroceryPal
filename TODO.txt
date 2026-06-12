@@ -1,9 +1,20 @@
 1.We need to be able to speed up this scrape/sync (DONE AMAZING)
 2.Small feature - i want to be able to clear the search with an x at the end of the search bar (DONE (needs improvement)
-3.(explore first).Explore the possibility of more stores and especially being able to pick other save on locations.
+3.(explore first).Explore the possibility of more stores and especially being able to pick other save on locations. (already have superstore and nofrills (not on map or app although they have been in the past))
 	a.Ultimately this would be the best if it could be a map with all grocery stores.
 	b.maybe can add feature to make a grecery basket and check where its cheapest nearby (on map)
 		i. thjis would require scraping from multiple grocers nearby soooo.... IDK it depends on how long a scrape 		takes otherwise well have to use certain techniques but im sure scraping scpefic items in a users basket wont 		be that bad. Also when thyre creating a basket i guess this should be like a generic item selector IDK or 		maybe we just scrape multiple stores and have icons/logos for which store you can gett things at.
 4. I beleive that, as a consumer, the abiltiy to witness price changes at your local grocery store is FANTASTIC and empowering to the consumer RN the price comparison is easy but there should be a whole section of the app dedicated just to price changes so the consumer can witness the changes. 
 5. Add a filter for "most discounted"
+
+
+TO FIX:
+
+- Althhough i have seen all 3 chains on the map at one point, right now all im seeing is save on foods
+- Seems that the .bat and the .exe are not synced (that must happen automatically) 
+- Lodaing times were optimzed at one point but now it takes a long toime to load already scraped items
+- not seeing march data from older stores (langley) 
+
+NEXT EFFORT: 
+- Fix the issues and make sure all is 100%
 
