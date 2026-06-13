@@ -7,6 +7,12 @@
       "runtimeArgs": ["app.py"],
       "port": 5000,
       "autoPort": true
+    },
+    {
+      "name": "static-docs",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-c", "cd /tmp/gp_docs && exec python3 -m http.server 8770"],
+      "port": 8770
     }
   ]
 }

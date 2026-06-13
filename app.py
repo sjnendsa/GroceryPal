@@ -373,7 +373,10 @@ def categories():
 
 @app.route("/api/sales")
 def sales():
-    return jsonify(db.get_sales())
+    page = int(request.args.get("page", 1))
+    per_page = int(request.args.get("per_page", 48))
+    items, total = db.get_sales(page=page, per_page=per_page)
+    return jsonify({"sales": items, "total": total, "page": page, "per_page": per_page})
 
 
 @app.route("/api/price-drops")

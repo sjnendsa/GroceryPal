@@ -382,16 +382,22 @@ def get_stats():
         }
 
 
-def get_sales():
+def get_sales(page=1, per_page=48):
     with get_conn() as conn:
+        offset = (page - 1) * per_page
         rows = conn.execute(
             """SELECT p.*, p.latest_price AS price, p.latest_at AS last_seen,
                       ROUND((p.regular_price - p.latest_price) / p.regular_price * 100, 1) AS discount_pct
                FROM products p
                WHERE p.on_sale = 1
-               ORDER BY discount_pct DESC"""
+               ORDER BY discount_pct DESC
+               LIMIT ? OFFSET ?""",
+            (per_page, offset),
         ).fetchall()
-        return [dict(r) for r in rows]
+        total = conn.execute(
+            "SELECT COUNT(*) FROM products WHERE on_sale = 1"
+        ).fetchone()[0]
+        return [dict(r) for r in rows], total
 
 
 def get_top_price_drops(limit=10):
