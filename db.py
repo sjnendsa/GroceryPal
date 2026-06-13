@@ -6,7 +6,7 @@ from contextlib import contextmanager
 _BASE = (os.path.dirname(sys.executable) if getattr(sys, "frozen", False)
          else os.path.dirname(os.path.abspath(__file__)))
 _DATA_DIR = os.path.join(_BASE, "data")
-DB_PATH = os.path.join(_DATA_DIR, "grocery_pal_1982.db")
+DB_PATH = os.path.join(_DATA_DIR, "grocery_pal_saveon_1982.db")
 
 
 def set_store(store_id):
@@ -14,6 +14,67 @@ def set_store(store_id):
     global DB_PATH
     DB_PATH = os.path.join(_DATA_DIR, f"grocery_pal_{store_id}.db")
     init_db()
+    # Builds from before the retailer-prefix naming wrote Save-On data to
+    # grocery_pal_<id>.db; fold any such file in so its history isn't lost.
+    if store_id.startswith("saveon_") and _merge_legacy_db(store_id.split("_", 1)[1]):
+        init_db()   # re-run backfill for products whose latest_at was reset
+
+
+def _merge_legacy_db(bare_id):
+    """Merge a legacy grocery_pal_<id>.db (no retailer prefix) into the current
+    saveon DB, then delete it. Returns True if a merge happened."""
+    legacy = os.path.join(_DATA_DIR, f"grocery_pal_{bare_id}.db")
+    if not os.path.exists(legacy) or os.path.abspath(legacy) == os.path.abspath(DB_PATH):
+        return False
+    try:
+        with get_conn() as conn:
+            conn.execute("ATTACH DATABASE ? AS legacy", (legacy,))
+            try:
+                pcols = [r[1] for r in conn.execute("PRAGMA legacy.table_info(products)")]
+                hcols = [r[1] for r in conn.execute("PRAGMA legacy.table_info(price_history)")]
+                if "product_id" not in pcols or "product_id" not in hcols:
+                    return False
+                pl = ", ".join(c for c in
+                               ("product_id", "name", "brand", "category", "subcategory",
+                                "image_url", "unit", "size", "url", "created_at", "updated_at")
+                               if c in pcols)
+                conn.execute(f"""INSERT OR IGNORE INTO products ({pl})
+                                 SELECT {pl} FROM legacy.products""")
+                hl = ", ".join(c for c in
+                               ("product_id", "price", "regular_price", "was_price", "on_sale",
+                                "sale_label", "min_qty", "in_stock", "scraped_at")
+                               if c in hcols)
+                conn.execute(f"""INSERT INTO price_history ({hl})
+                                 SELECT {hl} FROM legacy.price_history lp
+                                 WHERE NOT EXISTS (SELECT 1 FROM price_history ph
+                                                   WHERE ph.product_id = lp.product_id
+                                                     AND ph.scraped_at = lp.scraped_at)""")
+                conn.execute("""INSERT INTO scrape_runs
+                                    (started_at, completed_at, products_scraped,
+                                     new_products, status, notes)
+                                SELECT started_at, completed_at, products_scraped,
+                                       new_products, status, notes
+                                FROM legacy.scrape_runs lr
+                                WHERE NOT EXISTS (SELECT 1 FROM scrape_runs sr
+                                                  WHERE sr.started_at = lr.started_at)""")
+                # merged rows may be newer than the denormalized snapshot —
+                # clearing latest_at makes init_db's backfill recompute them
+                conn.execute("""UPDATE products SET latest_at = NULL
+                                WHERE COALESCE(latest_at, '') <
+                                      (SELECT MAX(scraped_at) FROM price_history ph
+                                       WHERE ph.product_id = products.product_id)""")
+            finally:
+                conn.commit()
+                conn.execute("DETACH DATABASE legacy")
+    except Exception as e:
+        print(f"Legacy DB merge skipped ({legacy}): {e}")
+        return False
+    for suffix in ("", "-shm", "-wal"):
+        try:
+            os.remove(legacy + suffix)
+        except OSError:
+            pass
+    return True
 
 
 def _ensure_dir():

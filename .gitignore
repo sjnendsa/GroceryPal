@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.venv/
+build/
+dist/
+*.spec
+# SQLite transient files — committing these from one machine can corrupt
+# the database when checked out on another
+*.db-shm
+*.db-wal

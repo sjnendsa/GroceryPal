@@ -31,7 +31,8 @@ _STORES_CACHE = os.path.join(_DATA_DIR, "stores.json")
 
 def _load_settings():
     try:
-        with open(_SETTINGS_PATH, encoding="utf-8") as f:
+        # utf-8-sig: tolerate the BOM that PowerShell/Windows editors prepend
+        with open(_SETTINGS_PATH, encoding="utf-8-sig") as f:
             return json.load(f)
     except Exception:
         return {"store_id": "1982", "store_name": "Save-on-Foods Langley", "retailer": "saveon"}
@@ -109,13 +110,23 @@ def _fetch_saveon_stores():
     return out
 
 
+def _stores_cache_usable(stores):
+    """Caches written before multi-chain support lack the retailer tag, and a
+    cache missing a chain means one fetch failed — both get refetched."""
+    return (isinstance(stores, list) and stores
+            and all(s.get("retailer") for s in stores)
+            and {"saveon", "superstore", "nofrills"} <= {s["retailer"] for s in stores})
+
+
 @app.route("/api/stores")
 def stores_list():
     """All locations across supported chains (name, address, lat/lng). Cached 7 days."""
     try:
         if os.path.exists(_STORES_CACHE) and time.time() - os.path.getmtime(_STORES_CACHE) < 7 * 86400:
             with open(_STORES_CACHE, encoding="utf-8") as f:
-                return jsonify(_apply_overrides(json.load(f)))
+                cached = json.load(f)
+            if _stores_cache_usable(cached):
+                return jsonify(_apply_overrides(cached))
     except Exception:
         pass
     import loblaw

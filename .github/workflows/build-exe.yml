@@ -1,0 +1,58 @@
+name: Build GroceryPal.exe
+
+# Rebuilds the frozen exe whenever the app source changes, so GroceryPal.exe
+# and "python app.py" (GroceryPal.bat) can never drift apart again.
+on:
+  push:
+    branches: [main]
+    paths:
+      - app.py
+      - db.py
+      - scraper.py
+      - loblaw.py
+      - templates/**
+      - requirements.txt
+      - .github/workflows/build-exe.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-exe
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt pyinstaller
+
+      - name: Build exe
+        run: >
+          pyinstaller --noconfirm --onefile --name GroceryPal
+          --exclude-module playwright
+          --add-data "templates;templates"
+          app.py
+
+      - name: Replace committed exe
+        run: Copy-Item -Force dist/GroceryPal.exe GroceryPal.exe
+
+      - name: Commit updated exe
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add GroceryPal.exe
+          if ! git diff --cached --quiet; then
+            git commit -m "Auto-rebuild GroceryPal.exe"
+            git pull --rebase origin main
+            git push
+          fi
