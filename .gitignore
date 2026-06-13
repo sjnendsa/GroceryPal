@@ -8,3 +8,4 @@ dist/
 # the database when checked out on another
 *.db-shm
 *.db-wal
+.claude/

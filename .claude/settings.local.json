@@ -1,9 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "WebSearch",
-      "PowerShell(python probe_api.py)",
-      "PowerShell($env:PYTHONIOENCODING='utf-8'; python probe_api.py)"
-    ]
-  }
-}
