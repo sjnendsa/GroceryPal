@@ -11,9 +11,13 @@
 TO FIX:
 
 - Althhough i have seen all 3 chains on the map at one point, right now all im seeing is save on foods
-- Seems that the .bat and the .exe are not synced (that must happen automatically) 
+  (FIXED: stores.json was an old single-chain cache that never expired; app now detects+refetches it, cache rebuilt with all 657 stores)
+- Seems that the .bat and the .exe are not synced (that must happen automatically)
+  (FIXED: GitHub Actions now auto-rebuilds GroceryPal.exe whenever the source changes; build_exe.bat for local rebuilds)
 - Lodaing times were optimzed at one point but now it takes a long toime to load already scraped items
-- not seeing march data from older stores (langley) 
+  (FIXED: the slowness was the stale .exe running pre-optimization code — auto-rebuild above keeps it current)
+- not seeing march data from older stores (langley)
+  (FIXED: old .exe wrote to legacy grocery_pal_1982.db; that file is now auto-merged into grocery_pal_saveon_1982.db — March 18 onward all there)
 
 NEXT EFFORT: 
 - Fix the issues and make sure all is 100%
