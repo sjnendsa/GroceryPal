@@ -11,7 +11,7 @@ q = """[out:json][timeout:120];
 nwr["shop"="supermarket"]["name"~"Save.On.Foods",i](48,-141,62,-95);
 out center tags;"""
 r = requests.post("https://overpass-api.de/api/interpreter", data={"data": q},
-                  headers={"User-Agent": "GroceryPal/1.0 sjnendsa@gmail.com"}, timeout=150)
+                  headers={"User-Agent": "GroceryPal/1.0 (+https://github.com/sjnendsa/GroceryPal)"}, timeout=150)
 pois = []
 for e in r.json()["elements"]:
     lat = e.get("lat") or e.get("center", {}).get("lat")

@@ -1,0 +1,47 @@
+name: Scheduled price sync
+
+# Scrapes fresh prices for every tracked store on GitHub's runners, then
+# re-bakes docs/ so the Pages site updates itself — no desktop app needed.
+# (Bot pushes don't trigger other workflows, so the export happens here too.)
+on:
+  schedule:
+    - cron: "23 13 * * *"   # daily, ~6:23am Pacific
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-stores
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install requests flask
+
+      - name: Sync all stores
+        run: python sync_all.py
+
+      - name: Export static site
+        run: python export_static.py
+
+      - name: Commit data + site
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data docs
+          if ! git diff --cached --quiet; then
+            git commit -m "Scheduled price sync"
+            git pull --rebase origin main
+            git push
+          fi

@@ -3,7 +3,7 @@
    Regenerate the data with:  python export_static.py */
 (() => {
   const KEYS = window.GP_STORE_KEYS || [];
-  const SYNC_MSG = 'Static snapshot — sync with the desktop app, then re-run export_static.py';
+  const SYNC_MSG = 'Prices refresh automatically once a day — no manual sync needed here.';
   const pending = {};
   const cache = {};
 
@@ -64,7 +64,7 @@
       }
       if (p === '/api/store') {  // POST: switch store
         const k = (body.retailer || 'saveon') + '_' + body.store_id;
-        if (!KEYS.includes(k)) return {error: 'No data in this snapshot — sync it with the desktop app first'};
+        if (!KEYS.includes(k)) return {error: 'This store isn’t tracked yet — only stores with price data can be selected'};
         localStorage.gp_static_store = JSON.stringify(
           {store_id: body.store_id, retailer: body.retailer || 'saveon',
            store_name: body.store_name || body.store_id});
