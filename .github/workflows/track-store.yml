@@ -1,0 +1,80 @@
+name: Track a store
+
+# On-demand store tracking: triggered by an issue titled
+# "Track store: <retailer> <store_id>" (the site links there for untracked
+# stores) or manually from the Actions tab. Scrapes the store once, re-bakes
+# docs/, and pushes — the store then shows up on the site. The daily
+# sync workflow keeps it fresh afterwards.
+on:
+  workflow_dispatch:
+    inputs:
+      retailer:
+        description: "saveon | superstore | nofrills"
+        required: true
+      store_id:
+        description: "Store ID (see data/stores.json)"
+        required: true
+  issues:
+    types: [opened]
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: track-store
+  cancel-in-progress: false
+
+jobs:
+  track:
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.event.issue.title, 'Track store:')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install requests flask
+
+      - name: Parse request
+        id: p
+        env:
+          TITLE: ${{ github.event.issue.title }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            retailer="${{ inputs.retailer }}"; store_id="${{ inputs.store_id }}"
+          else
+            read -r _ _ retailer store_id _ <<< "$TITLE"
+          fi
+          echo "retailer=$retailer" >> "$GITHUB_OUTPUT"
+          echo "store_id=$store_id" >> "$GITHUB_OUTPUT"
+
+      - name: Scrape store
+        run: python track_store.py "${{ steps.p.outputs.retailer }}" "${{ steps.p.outputs.store_id }}"
+
+      - name: Export static site
+        run: python export_static.py
+
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data docs
+          if ! git diff --cached --quiet; then
+            git commit -m "Track store: ${{ steps.p.outputs.retailer }} ${{ steps.p.outputs.store_id }}"
+            git pull --rebase origin main
+            git push
+          fi
+
+      - name: Close request issue
+        if: github.event_name == 'issues'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue comment ${{ github.event.issue.number }} -R ${{ github.repository }} \
+            -b "Done — this store is now tracked and will appear on the site in a few minutes."
+          gh issue close ${{ github.event.issue.number }} -R ${{ github.repository }}

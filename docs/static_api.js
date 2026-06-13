@@ -64,7 +64,15 @@
       }
       if (p === '/api/store') {  // POST: switch store
         const k = (body.retailer || 'saveon') + '_' + body.store_id;
-        if (!KEYS.includes(k)) return {error: 'This store isn’t tracked yet — only stores with price data can be selected'};
+        if (!KEYS.includes(k)) {
+          const issue = 'https://github.com/sjnendsa/GroceryPal/issues/new?title=' +
+            encodeURIComponent('Track store: ' + (body.retailer || 'saveon') + ' ' + body.store_id) +
+            '&body=' + encodeURIComponent('Automated tracking request for ' + (body.store_name || body.store_id) + '.');
+          const info = document.getElementById('store-sel-info');
+          if (info) info.innerHTML +=
+            ` — <a href="${issue}" target="_blank" rel="noopener">Request tracking</a> (ready ~10 min later)`;
+          return {error: 'Not tracked yet — click “Request tracking”'};
+        }
         localStorage.gp_static_store = JSON.stringify(
           {store_id: body.store_id, retailer: body.retailer || 'saveon',
            store_name: body.store_name || body.store_id});
