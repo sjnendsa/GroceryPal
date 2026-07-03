@@ -252,6 +252,34 @@ def save_batch(rows):
     if not rows:
         return
     with get_conn() as conn:
+        # Append a price_history row ONLY when the price/sale state changed from
+        # the last recorded scrape. The denormalized products row still holds the
+        # previous values at this point (we upsert it *after* this insert), so it
+        # doubles as the "last recorded" reference. Prices rarely move day-to-day,
+        # so this keeps history — and the committed DB file — bounded to real
+        # price movements instead of one row per product per daily sync.
+        conn.executemany(
+            """INSERT INTO price_history
+                   (product_id, price, regular_price, was_price,
+                    on_sale, sale_label, min_qty, in_stock)
+               SELECT ?,?,?,?,?,?,?,?
+               WHERE NOT EXISTS (
+                   SELECT 1 FROM products p
+                   WHERE p.product_id = ?
+                     AND p.latest_at IS NOT NULL
+                     AND p.latest_price   IS ?
+                     AND p.regular_price  IS ?
+                     AND p.was_price      IS ?
+                     AND p.on_sale        IS ?
+                     AND p.in_stock       IS ?
+               )""",
+            [(p["product_id"], pr["price"], pr.get("regular_price"), pr.get("was_price"),
+              1 if pr.get("on_sale") else 0, pr.get("sale_label"), pr.get("min_qty") or 1,
+              1 if pr.get("in_stock", True) else 0,
+              p["product_id"], pr["price"], pr.get("regular_price"), pr.get("was_price"),
+              1 if pr.get("on_sale") else 0, 1 if pr.get("in_stock", True) else 0)
+             for p, pr in rows],
+        )
         conn.executemany(
             """INSERT INTO products
                    (product_id, name, brand, category, subcategory,
@@ -281,15 +309,6 @@ def save_batch(rows):
               1 if pr.get("on_sale") else 0, pr.get("sale_label"),
               pr.get("min_qty") or 1, 1 if pr.get("in_stock", True) else 0)
              for p, pr in rows],
-        )
-        conn.executemany(
-            """INSERT INTO price_history
-                   (product_id, price, regular_price, was_price,
-                    on_sale, sale_label, min_qty, in_stock)
-               VALUES (?,?,?,?,?,?,?,?)""",
-            [(p["product_id"], pr["price"], pr.get("regular_price"), pr.get("was_price"),
-              1 if pr.get("on_sale") else 0, pr.get("sale_label"), pr.get("min_qty") or 1,
-              1 if pr.get("in_stock", True) else 0) for p, pr in rows],
         )
 
 
