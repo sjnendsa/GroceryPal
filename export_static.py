@@ -84,6 +84,38 @@ def export_stores_list(keys):
         f.write(f"window.GP_DEFAULT_STORE={json.dumps(st)};\n")
 
 
+def export_nutrition(keys):
+    """Bakes the per-retailer nutrition caches into docs/nutrition/ as ~100
+    sharded .js files per retailer, loaded on demand when a product modal
+    opens (retailer APIs refuse browser CORS, so facts must ship with the
+    site). Shard = last two digits of the product id."""
+    import nutrition as nut
+    out_dir = os.path.join(DOCS, "nutrition")
+    os.makedirs(out_dir, exist_ok=True)
+    retailers = sorted({k.rsplit("_", 1)[0] for k in keys})
+    for retailer in retailers:
+        path = nut.cache_path(retailer)
+        if not os.path.exists(path):
+            continue
+        conn = sqlite3.connect(path)
+        shards = {}
+        n = 0
+        for pid, payload in conn.execute(
+                "SELECT product_id, payload FROM facts WHERE payload IS NOT NULL"):
+            digits = re.sub(r"\D", "", pid)
+            shards.setdefault(digits[-2:] if len(digits) >= 2 else "00", {})[pid] = json.loads(payload)
+            n += 1
+        conn.close()
+        for shard, items in shards.items():
+            with open(os.path.join(out_dir, f"{retailer}_{shard}.js"), "w", encoding="utf-8") as f:
+                f.write("window.GP_NUT=window.GP_NUT||{};"
+                        f"Object.assign(window.GP_NUT[{json.dumps(retailer)}]="
+                        f"window.GP_NUT[{json.dumps(retailer)}]||{{}},")
+                json.dump(items, f, separators=(",", ":"))
+                f.write(");\n")
+        print(f"  nutrition {retailer}: {n} products in {len(shards)} shards")
+
+
 def export_index():
     with open(os.path.join(BASE, "templates", "index.html"), encoding="utf-8") as f:
         html = f.read()
@@ -103,6 +135,7 @@ def main():
         keys.append(key)
         print(f"  {key}: {n} products")
     export_stores_list(keys)
+    export_nutrition(keys)
     export_index()
     print(f"Static bundle written to docs/ ({len(keys)} stores)")
 

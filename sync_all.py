@@ -37,6 +37,19 @@ def main():
         except Exception as e:
             print(f"  FAILED: {e}", flush=True)
             failed.append(key)
+    # Top up the nutrition caches for products that appeared since the last
+    # run (facts are fetched once per product, then baked into docs/).
+    import nutrition
+    for retailer in ("saveon", "nofrills", "superstore"):
+        store = nutrition.a_store_of(retailer)
+        if store:
+            try:
+                nutrition.backfill(retailer, store,
+                                   sorted(nutrition.union_product_ids(retailer)),
+                                   budget=8000)
+            except Exception as e:
+                print(f"  nutrition top-up {retailer} failed: {e}", flush=True)
+
     if failed:
         raise SystemExit(f"failed: {', '.join(failed)}")
 

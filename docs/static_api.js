@@ -25,6 +25,21 @@
     return pending[key];
   }
 
+  // generic on-demand script loader (nutrition shards); failures retry next call
+  const anyPending = {};
+  function loadAnyScript(src) {
+    if (!anyPending[src]) {
+      anyPending[src] = new Promise((res, rej) => {
+        const s = document.createElement('script');
+        s.src = src;
+        s.onload = res;
+        s.onerror = () => { s.remove(); delete anyPending[src]; rej(new Error(src)); };
+        document.head.appendChild(s);
+      });
+    }
+    return anyPending[src];
+  }
+
   const unpack = t => t.rows.map(r => Object.fromEntries(t.cols.map((c, i) => [c, r[i]])));
 
   async function store(key) {
@@ -176,10 +191,19 @@
 
       m = p.match(/^\/api\/products\/([^/]+)\/live$/);
       if (m) {
-        // Retailer APIs don't allow browser CORS, so the static site can't
-        // fetch nutrition — link to the retailer's product page instead.
-        const prod = d.byId[decodeURIComponent(m[1])];
+        // Nutrition is baked into docs/nutrition/ shards at export time
+        // (retailer APIs refuse browser CORS, so no live fetch is possible).
+        const pid = decodeURIComponent(m[1]);
+        const prod = d.byId[pid];
         const s = settings();
+        const digits = pid.replace(/\D/g, '');
+        const shard = digits.length >= 2 ? digits.slice(-2) : '00';
+        try {
+          await loadAnyScript('nutrition/' + s.retailer + '_' + shard + '.js');
+        } catch (e) {}
+        const facts = ((window.GP_NUT || {})[s.retailer] || {})[pid];
+        if (facts) return {promotions: [], ...facts};
+        // no facts published for this product — fall back to a store link
         let ext = null;
         if (prod && (s.retailer === 'nofrills' || s.retailer === 'superstore')) {
           const host = s.retailer === 'nofrills' ? 'www.nofrills.ca' : 'www.realcanadiansuperstore.ca';
