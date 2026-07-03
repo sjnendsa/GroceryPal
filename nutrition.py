@@ -14,6 +14,8 @@ import logging
 import os
 import re
 import sqlite3
+import sys
+import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -156,7 +158,6 @@ def backfill(retailer, store_id, product_ids, budget=3000, workers=12, delay=0.0
     """Fetches facts for up to `budget` uncached products. Returns fetch count.
     `delay` adds a per-worker pause between requests — the Loblaw detail
     endpoint bans IPs that fetch too aggressively."""
-    import time as _time
     conn = _cache_conn(retailer)
     have = {r[0] for r in conn.execute("SELECT product_id FROM facts")}
     todo = [p for p in product_ids if p not in have][:budget]
@@ -166,9 +167,21 @@ def backfill(retailer, store_id, product_ids, budget=3000, workers=12, delay=0.0
 
     base = (lambda pid: _fetch_saveon(store_id, pid)) if retailer == "saveon" \
         else (lambda pid: _fetch_loblaw(retailer, store_id, pid))
-    fetch = (lambda pid: (_time.sleep(delay), base(pid))[1]) if delay else base
+    fetch = (lambda pid: (time.sleep(delay), base(pid))[1]) if delay else base
 
-    done = 0
+    done = errors = 0
+    t0 = time.time()
+    tty = sys.stdout.isatty()
+
+    def progress():
+        pct = done / len(todo)
+        bar = "█" * int(28 * pct) + "░" * (28 - int(28 * pct))
+        rate = done / max(time.time() - t0, 1)
+        eta = (len(todo) - done) / max(rate, 0.1) / 60
+        sys.stdout.write(f"\r  {retailer:10s} [{bar}] {done:>6,}/{len(todo):,}"
+                         f"  {rate:4.0f}/s  ETA {eta:3.0f}m  errors {errors:,} ")
+        sys.stdout.flush()
+
     with ThreadPoolExecutor(max_workers=workers) as ex:
         futs = {ex.submit(fetch, pid): pid for pid in todo}
         batch = []
@@ -178,20 +191,26 @@ def backfill(retailer, store_id, product_ids, budget=3000, workers=12, delay=0.0
                 payload = fut.result()
             except Exception:
                 payload = None
+            done += 1
+            if tty and done % 20 == 0:
+                progress()
             if payload is None:
                 # fetch FAILED (HTTP error / rate limit) — don't cache, so it
                 # retries next run. Only a successful "nothing published"
                 # response is cached as NULL.
-                done += 1
+                errors += 1
                 continue
             has_facts = bool(payload["nutrition"] or payload["ingredients"])
             batch.append((pid, json.dumps(payload, separators=(",", ":")) if has_facts else None))
-            done += 1
             if len(batch) >= 500:
                 conn.executemany("INSERT OR REPLACE INTO facts (product_id, payload) VALUES (?,?)", batch)
                 conn.commit()
                 batch = []
-                log.info(f"  nutrition {retailer}: {done}/{len(todo)}")
+                if not tty:
+                    log.info(f"  nutrition {retailer}: {done}/{len(todo)}")
+    if tty:
+        progress()
+        print()
     conn.executemany("INSERT OR REPLACE INTO facts (product_id, payload) VALUES (?,?)", batch)
     conn.commit()
     conn.close()
