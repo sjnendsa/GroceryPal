@@ -1399,19 +1399,43 @@ function closeModalBtn() {
 
 let modalHistory = [];
 
+// History stores only the days a price actually changed; carry the last
+// known price forward through the quiet days so charts stay continuous.
+function forwardFillDaily(h) {
+  if (!h.length) return [];
+  const MS = 86400000;
+  const out = [];
+  const first = Date.parse(h[0].scraped_at.slice(0, 10) + 'T00:00:00Z');
+  const today = Date.parse(new Date().toISOString().slice(0, 10) + 'T00:00:00Z');
+  let i = 0, cur = null;
+  for (let t = first; t <= today; t += MS) {
+    const day = new Date(t).toISOString().slice(0, 10);
+    if (i < h.length && h[i].scraped_at.slice(0, 10) === day) {
+      cur = h[i++];
+      out.push({...cur, day, changed: true});
+    } else if (cur) {
+      out.push({...cur, day, changed: false});
+    }
+  }
+  return out;
+}
+
 function redrawChart() {
   const days = +document.getElementById('chart-period').value;
-  let h = modalHistory;
-  if (days) {
-    const cutoff = Date.now() - days * 86400000;
-    h = h.filter(x => new Date(x.scraped_at + (x.scraped_at.includes('T') ? '' : 'Z')) >= cutoff);
-  }
   // collapse multiple same-day syncs to the day's last reading
   const byDay = {};
-  h.forEach(x => byDay[x.scraped_at.slice(0, 10)] = x);
-  h = Object.values(byDay);
-  document.getElementById('modal-history-count').textContent =
-    `${h.length} data point${h.length !== 1 ? 's' : ''}`;
+  modalHistory.forEach(x => byDay[x.scraped_at.slice(0, 10)] = x);
+  const changes = Object.keys(byDay).length;
+  let h = forwardFillDaily(Object.values(byDay)
+            .sort((a, b) => a.scraped_at < b.scraped_at ? -1 : 1));
+  if (days) {
+    const cutoff = Date.parse(new Date(Date.now() - days * 86400000)
+                    .toISOString().slice(0, 10) + 'T00:00:00Z');
+    h = h.filter(x => Date.parse(x.day + 'T00:00:00Z') >= cutoff);
+  }
+  document.getElementById('modal-history-count').textContent = h.length > 1
+    ? `${h.length} days · ${changes} price change${changes !== 1 ? 's' : ''}`
+    : `${h.length} data point${h.length !== 1 ? 's' : ''}`;
   renderPriceChart(h);
 }
 
@@ -1426,8 +1450,8 @@ function renderPriceChart(history) {
   emptyEl.style.display = 'none';
 
   const labels = history.map(h => {
-    const d = new Date(h.scraped_at + (h.scraped_at.includes('T') ? '' : 'Z'));
-    return d.toLocaleDateString('en-CA', {month:'short', day:'numeric'});
+    const iso = h.day || h.scraped_at.slice(0, 10);
+    return new Date(iso + 'T12:00:00').toLocaleDateString('en-CA', {month:'short', day:'numeric'});
   });
   const prices   = history.map(h => h.price);
   const regulars = history.map(h => h.regular_price);
@@ -1444,9 +1468,11 @@ function renderPriceChart(history) {
           borderColor: '#0e7a3d',
           backgroundColor: 'rgba(14,122,61,.06)',
           borderWidth: 2,
-          pointRadius: history.map(h => h.on_sale ? 4 : 2.5),
+          // dots mark the days the price actually changed; filled days stay clean
+          pointRadius: history.map(h => h.changed === false ? 0 : (h.on_sale ? 4 : 2.5)),
+          pointHoverRadius: 4,
           pointBackgroundColor: history.map(h => h.on_sale ? '#c8102e' : '#0e7a3d'),
-          tension: 0.25,
+          stepped: 'before',
           fill: true,
         },
         {
@@ -1456,7 +1482,7 @@ function renderPriceChart(history) {
           borderWidth: 1.5,
           borderDash: [4,4],
           pointRadius: 0,
-          tension: 0.25,
+          stepped: 'before',
         },
       ],
     },
