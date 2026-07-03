@@ -252,34 +252,26 @@ def save_batch(rows):
     if not rows:
         return
     with get_conn() as conn:
-        # Append a price_history row ONLY when the price/sale state changed from
-        # the last recorded scrape. The denormalized products row still holds the
-        # previous values at this point (we upsert it *after* this insert), so it
-        # doubles as the "last recorded" reference. Prices rarely move day-to-day,
-        # so this keeps history — and the committed DB file — bounded to real
-        # price movements instead of one row per product per daily sync.
-        conn.executemany(
-            """INSERT INTO price_history
-                   (product_id, price, regular_price, was_price,
-                    on_sale, sale_label, min_qty, in_stock)
-               SELECT ?,?,?,?,?,?,?,?
-               WHERE NOT EXISTS (
-                   SELECT 1 FROM products p
-                   WHERE p.product_id = ?
-                     AND p.latest_at IS NOT NULL
-                     AND p.latest_price   IS ?
-                     AND p.regular_price  IS ?
-                     AND p.was_price      IS ?
-                     AND p.on_sale        IS ?
-                     AND p.in_stock       IS ?
-               )""",
-            [(p["product_id"], pr["price"], pr.get("regular_price"), pr.get("was_price"),
-              1 if pr.get("on_sale") else 0, pr.get("sale_label"), pr.get("min_qty") or 1,
-              1 if pr.get("in_stock", True) else 0,
-              p["product_id"], pr["price"], pr.get("regular_price"), pr.get("was_price"),
-              1 if pr.get("on_sale") else 0, 1 if pr.get("in_stock", True) else 0)
-             for p, pr in rows],
-        )
+        # Snapshot each product's last-recorded price state BEFORE the upsert
+        # overwrites it, so we can tell which products actually changed. Prices
+        # rarely move day-to-day, so recording history only for real changes
+        # keeps the committed DB file bounded instead of growing one row per
+        # product per daily sync (which pushed it past GitHub's 100 MB limit).
+        prev = {r["product_id"]: r for r in conn.execute(
+            "SELECT product_id, latest_price, regular_price, was_price, on_sale, in_stock FROM products")}
+
+        def changed(p, pr):
+            o = prev.get(p["product_id"])
+            if o is None or o["latest_price"] is None:   # new product / no prior price
+                return True
+            return not (o["latest_price"] == pr["price"]
+                        and o["regular_price"] == pr.get("regular_price")
+                        and o["was_price"] == pr.get("was_price")
+                        and o["on_sale"] == (1 if pr.get("on_sale") else 0)
+                        and o["in_stock"] == (1 if pr.get("in_stock", True) else 0))
+
+        # Upsert products first so the price_history foreign key is satisfied
+        # for brand-new products.
         conn.executemany(
             """INSERT INTO products
                    (product_id, name, brand, category, subcategory,
@@ -309,6 +301,17 @@ def save_batch(rows):
               1 if pr.get("on_sale") else 0, pr.get("sale_label"),
               pr.get("min_qty") or 1, 1 if pr.get("in_stock", True) else 0)
              for p, pr in rows],
+        )
+        # Append history only for products whose price/sale state moved.
+        conn.executemany(
+            """INSERT INTO price_history
+                   (product_id, price, regular_price, was_price,
+                    on_sale, sale_label, min_qty, in_stock)
+               VALUES (?,?,?,?,?,?,?,?)""",
+            [(p["product_id"], pr["price"], pr.get("regular_price"), pr.get("was_price"),
+              1 if pr.get("on_sale") else 0, pr.get("sale_label"), pr.get("min_qty") or 1,
+              1 if pr.get("in_stock", True) else 0)
+             for p, pr in rows if changed(p, pr)],
         )
 
 
