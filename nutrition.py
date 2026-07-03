@@ -172,6 +172,9 @@ def backfill(retailer, store_id, product_ids, budget=3000, workers=12, delay=0.0
     done = errors = 0
     t0 = time.time()
     tty = sys.stdout.isatty()
+    # the per-product HTTP-403 warnings are noise here — the progress bar
+    # counts errors, and a blocked IP aborts below anyway
+    logging.getLogger("scraper.loblaw").setLevel(logging.ERROR)
 
     def progress():
         pct = done / len(todo)
@@ -199,6 +202,13 @@ def backfill(retailer, store_id, product_ids, budget=3000, workers=12, delay=0.0
                 # retries next run. Only a successful "nothing published"
                 # response is cached as NULL.
                 errors += 1
+                # blocked IP: nearly everything fails — stop wasting requests
+                if done >= 60 and errors / done > 0.9:
+                    ex.shutdown(cancel_futures=True)
+                    if tty:
+                        print(f"\n  {retailer}: rate-limited (HTTP 403) — "
+                              "stopping; run again in an hour or two, it resumes automatically.")
+                    break
                 continue
             has_facts = bool(payload["nutrition"] or payload["ingredients"])
             batch.append((pid, json.dumps(payload, separators=(",", ":")) if has_facts else None))
