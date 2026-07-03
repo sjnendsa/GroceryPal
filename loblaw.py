@@ -199,13 +199,15 @@ def normalise(tile, category=None, subcategory=None):
     if price is None and member is None:
         return None, None
 
-    # member price is what the shopper pays when lower; regular = shelf
-    current = member if (member is not None and (price is None or member < price)) else price
-    regular = price if (member is not None and member < (price or 1e9)) else None
+    # The banner sites show the shelf price as THE price; PC Optimum member
+    # pricing is a separate labeled offer, so keep it in its own field.
+    current = price if price is not None else member
+    regular = None
+    member_price = member if (member is not None and (price is None or member < price)) else None
 
     promos = tile.get("promotions") or []
     deal = tile.get("deal") or {}
-    on_sale = bool(was) or bool(deal) or bool(promos)
+    on_sale = bool(was) or bool(deal) or bool(promos) or member_price is not None
     label = None
     if promos and isinstance(promos[0], dict):
         label = promos[0].get("text") or promos[0].get("title")
@@ -232,6 +234,7 @@ def normalise(tile, category=None, subcategory=None):
         "price": current,
         "regular_price": regular if regular is not None else was,
         "was_price": was,
+        "member_price": member_price,
         "on_sale": on_sale,
         "sale_label": label,
         "min_qty": 1,
@@ -258,10 +261,12 @@ def _search_page(session, banner, store_id, category_id, frm):
         r = session.post(f"{API}/api/v2/products/search", headers=_headers(banner),
                          json=body, timeout=25)
         if r.status_code != 200:
+            log.warning(f"search cat={category_id} page={frm}: HTTP {r.status_code} {r.text[:120]!r}")
             return None, 0
         d = r.json()
         return d, int(d.get("searchResultsCount") or 0)
-    except (requests.RequestException, ValueError):
+    except (requests.RequestException, ValueError) as e:
+        log.warning(f"search cat={category_id} page={frm}: {e}")
         return None, 0
 
 
@@ -318,3 +323,82 @@ def iter_catalog(banner, store_id, categories, on_page=None, workers=16):
                 yield product, price
             if on_page:
                 on_page(done, total_cats, len(seen))
+
+
+# ── Product detail (nutrition / ingredients) ──────────────────────────────────
+
+# nutritionFacts codes -> Nutrition Facts label names (app._NUTRIENT_LAYOUT)
+_NF_LABELS = {
+    "calories": "Calories", "totalFat": "Total Fat", "saturatedFat": "Saturated",
+    "transFat": "Trans", "polyunsaturatedFat": "Polyunsaturated",
+    "monounsaturatedFat": "Monounsaturated", "omega3": "Omega-3", "omega6": "Omega-6",
+    "cholesterol": "Cholesterol", "sodium": "Sodium",
+    "totalCarbohydrate": "Total Carbohydrate", "dietaryFiber": "Dietary Fibre",
+    "sugar": "Sugars", "addedSugar": "Added Sugars", "sugarAlcohol": "Sugar Alcohol",
+    "starch": "Starch", "protein": "Protein",
+    "vitaminA": "Vitamin A", "vitaminC": "Vitamin C", "vitaminD": "Vitamin D",
+    "calcium": "Calcium", "iron": "Iron", "potassium": "Potassium",
+}
+_NF_SKIP = {"saturatedTransFat", "servingSizeEN", "servingSizeFR", "houseHoldServingSize"}
+
+
+def fetch_product_detail(banner, store_id, product_id):
+    """GET /api/v1/products/{id} — description, ingredients, nutritionFacts,
+    offers (incl. memberOnlyPrice + promotions). Returns dict or None."""
+    import datetime
+    try:
+        r = requests.get(
+            f"{API}/api/v1/products/{product_id}",
+            headers=_headers(banner),
+            params={"lang": "en",
+                    "date": datetime.date.today().strftime("%d%m%Y"),
+                    "pickupType": "STORE", "storeId": store_id, "banner": banner},
+            timeout=15)
+        if r.status_code != 200:
+            log.warning(f"product detail {product_id}: HTTP {r.status_code}")
+            return None
+        return r.json()
+    except (requests.RequestException, ValueError) as e:
+        log.warning(f"product detail {product_id}: {e}")
+        return None
+
+
+def _nf_value(s):
+    """'10 g' -> (10.0, 'g');  '13 %' -> 13.0 via pct caller;  None -> (None, None)"""
+    if not s:
+        return None, None
+    m = re.match(r"\s*([\d.]+)\s*(.*)", str(s))
+    return (float(m.group(1)), (m.group(2).strip() or None)) if m else (None, None)
+
+
+def parse_nutrition(detail):
+    """detail (from fetch_product_detail) -> ({name: {size, unit, pct}}, serving_size)."""
+    facts = detail.get("nutritionFacts") or []
+    if not isinstance(facts, list) or not facts:
+        return {}, None
+    profile = facts[0] or {}
+    nutrition, serving_g, serving_house = {}, None, None
+
+    def walk(node):
+        nonlocal serving_g, serving_house
+        if isinstance(node, dict):
+            code = node.get("code")
+            if code == "servingSizeEN":
+                serving_g = node.get("valueInGram")
+            elif code == "houseHoldServingSize":
+                serving_house = node.get("valueInGram")
+            elif code and code not in _NF_SKIP and (node.get("valueInGram") or node.get("valuePercent")):
+                name = _NF_LABELS.get(code, re.sub(r"(?<=[a-z])(?=[A-Z])", " ", code).title())
+                size, unit = _nf_value(node.get("valueInGram"))
+                pct, _ = _nf_value(node.get("valuePercent"))
+                nutrition[name] = {"size": size, "unit": unit, "pct": pct}
+            for v in node.values():
+                walk(v)
+        elif isinstance(node, list):
+            for v in node:
+                walk(v)
+
+    walk(profile)
+    serving = (f"{serving_house} ({serving_g})" if serving_house and serving_g
+               else serving_house or serving_g)
+    return nutrition, serving

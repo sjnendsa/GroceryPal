@@ -25,9 +25,15 @@ def main():
         print(f"=== {key} ===", flush=True)
         try:
             if retailer == "saveon":
-                scraper.scrape_api(sid, db_key=key)
+                n = scraper.scrape_api(sid, db_key=key)
             else:
-                _scrape_loblaw(retailer, sid, key)
+                n = _scrape_loblaw(retailer, sid, key)
+            # A store that scrapes zero products means the API is broken or
+            # blocking us — its prices would silently go stale. Fail the run
+            # so it shows up red instead of "success" with frozen data.
+            if not n:
+                print("  FAILED: scraped 0 products", flush=True)
+                failed.append(key)
         except Exception as e:
             print(f"  FAILED: {e}", flush=True)
             failed.append(key)

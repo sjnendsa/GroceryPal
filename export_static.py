@@ -20,9 +20,9 @@ DOCS = os.path.join(BASE, "docs")
 P_COLS = ["product_id", "name", "brand", "category", "subcategory", "image_url",
           "unit", "size", "latest_price", "regular_price", "was_price", "on_sale",
           "sale_label", "min_qty", "in_stock", "latest_at", "prev_price", "prev_at",
-          "created_at"]
+          "created_at", "member_price", "url"]
 H_COLS = ["product_id", "price", "regular_price", "on_sale", "sale_label",
-          "in_stock", "scraped_at"]
+          "in_stock", "scraped_at", "member_price"]
 
 
 def _write_js(path, assign, payload):

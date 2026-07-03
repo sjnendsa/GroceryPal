@@ -255,9 +255,11 @@ def _order_nutrition(nutrition: dict) -> list:
 
 @app.route("/api/products/<product_id>/live")
 def product_live_detail(product_id):
-    """Fetches live description, nutrition, and current promotions from Save On Foods API."""
-    # Live product detail (nutrition/ingredients) is a Save-On-only endpoint.
-    if _settings.get("retailer", "saveon") != "saveon":
+    """Fetches live description, nutrition, and current promotions from the retailer API."""
+    retailer = _settings.get("retailer", "saveon")
+    if retailer in ("nofrills", "superstore"):
+        return _loblaw_live_detail(retailer, _settings["store_id"], product_id)
+    if retailer != "saveon":
         return jsonify({"nutrition": [], "promotions": [], "description": "", "ingredients": ""})
     store_id = _settings["store_id"]
     headers = {**_SOF_HEADERS, "X-Correlation-Id": str(uuid.uuid4())}
@@ -354,6 +356,46 @@ def product_live_detail(product_id):
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+def _loblaw_live_detail(banner, store_id, product_id):
+    """Same response shape as the Save-On branch, from the PC Express detail API."""
+    import re as _re
+    import loblaw
+    d = loblaw.fetch_product_detail(banner, store_id, product_id)
+    if d is None:
+        return jsonify({"error": "Not found in live API"}), 404
+
+    nutrition, serving_size = loblaw.parse_nutrition(d)
+
+    offer = (d.get("offers") or [{}])[0] or {}
+    promos = []
+    for p in (offer.get("promotions") or []) + (offer.get("memberOnlyPromotions") or []):
+        if isinstance(p, dict):
+            promos.append({
+                "name": p.get("text") or p.get("title") or p.get("name"),
+                "start": p.get("startDate"),
+                "end": p.get("expiryDate") or p.get("endDate"),
+                "min_qty": p.get("minimumQuantity", 1),
+                "loyalty": bool(p.get("type") and "MEMBER" in str(p.get("type")).upper()),
+                "limit": p.get("limit"),
+            })
+
+    desc = _re.sub(r"<[^>]+>", " ", d.get("description") or "").strip()
+    ingredients = _re.sub(r"&nbsp;?", " ", d.get("ingredients") or "").strip()
+    price_block = offer.get("price") or {}
+    return jsonify({
+        "description": desc,
+        "ingredients": ingredients,
+        "serving_size": serving_size,
+        "num_servings": None,
+        "nutrition": _order_nutrition(nutrition),
+        "promotions": [p for p in promos if p["name"]],
+        "price": price_block.get("value"),
+        "was_price": (offer.get("wasPrice") or {}).get("value") if isinstance(offer.get("wasPrice"), dict) else offer.get("wasPrice"),
+        "tpr": None,
+        "tpr_until": None,
+    })
 
 
 @app.route("/api/products/<product_id>/history")

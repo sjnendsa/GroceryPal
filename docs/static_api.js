@@ -175,7 +175,21 @@
       if (m) return d.hist[decodeURIComponent(m[1])] || [];
 
       m = p.match(/^\/api\/products\/([^/]+)\/live$/);
-      if (m) return {description: '', ingredients: '', nutrition: [], promotions: []};
+      if (m) {
+        // Retailer APIs don't allow browser CORS, so the static site can't
+        // fetch nutrition — link to the retailer's product page instead.
+        const prod = d.byId[decodeURIComponent(m[1])];
+        const s = settings();
+        let ext = null;
+        if (prod && (s.retailer === 'nofrills' || s.retailer === 'superstore')) {
+          const host = s.retailer === 'nofrills' ? 'www.nofrills.ca' : 'www.realcanadiansuperstore.ca';
+          if (prod.url) ext = 'https://' + host + prod.url;
+        } else if (prod) {
+          ext = 'https://www.saveonfoods.com/sm/pickup/rsid/' + s.store_id +
+                '/results?q=' + encodeURIComponent(prod.name || '');
+        }
+        return {description: '', ingredients: '', nutrition: [], promotions: [], external_url: ext};
+      }
 
       return {};
     } catch (e) {

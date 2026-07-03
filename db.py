@@ -153,6 +153,9 @@ def init_db():
         for col_sql in [
             "ALTER TABLE price_history ADD COLUMN was_price REAL",
             "ALTER TABLE price_history ADD COLUMN min_qty INTEGER DEFAULT 1",
+            # Loblaw PC Optimum member-only offer price (shelf price stays in price)
+            "ALTER TABLE price_history ADD COLUMN member_price REAL",
+            "ALTER TABLE products ADD COLUMN member_price REAL",
             # Denormalized current/previous price (kept fresh by save_batch).
             # Readers never scan price_history — it exists for charts only.
             "ALTER TABLE products ADD COLUMN latest_price REAL",
@@ -258,7 +261,7 @@ def save_batch(rows):
         # keeps the committed DB file bounded instead of growing one row per
         # product per daily sync (which pushed it past GitHub's 100 MB limit).
         prev = {r["product_id"]: r for r in conn.execute(
-            "SELECT product_id, latest_price, regular_price, was_price, on_sale, in_stock FROM products")}
+            "SELECT product_id, latest_price, regular_price, was_price, member_price, on_sale, in_stock FROM products")}
 
         def changed(p, pr):
             o = prev.get(p["product_id"])
@@ -267,6 +270,7 @@ def save_batch(rows):
             return not (o["latest_price"] == pr["price"]
                         and o["regular_price"] == pr.get("regular_price")
                         and o["was_price"] == pr.get("was_price")
+                        and o["member_price"] == pr.get("member_price")
                         and o["on_sale"] == (1 if pr.get("on_sale") else 0)
                         and o["in_stock"] == (1 if pr.get("in_stock", True) else 0))
 
@@ -276,9 +280,9 @@ def save_batch(rows):
             """INSERT INTO products
                    (product_id, name, brand, category, subcategory,
                     image_url, unit, size, url,
-                    latest_price, regular_price, was_price, on_sale,
+                    latest_price, regular_price, was_price, member_price, on_sale,
                     sale_label, min_qty, in_stock, latest_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
                ON CONFLICT(product_id) DO UPDATE SET
                    name=excluded.name, brand=excluded.brand,
                    category=excluded.category, subcategory=excluded.subcategory,
@@ -290,7 +294,8 @@ def save_batch(rows):
                    prev_at=CASE WHEN latest_at IS NOT NULL AND date(latest_at) < date('now')
                                 THEN latest_at ELSE prev_at END,
                    latest_price=excluded.latest_price, regular_price=excluded.regular_price,
-                   was_price=excluded.was_price, on_sale=excluded.on_sale,
+                   was_price=excluded.was_price, member_price=excluded.member_price,
+                   on_sale=excluded.on_sale,
                    sale_label=excluded.sale_label, min_qty=excluded.min_qty,
                    in_stock=excluded.in_stock, latest_at=excluded.latest_at,
                    updated_at=datetime('now')""",
@@ -298,6 +303,7 @@ def save_batch(rows):
               p.get("subcategory"), p.get("image_url"), p.get("unit"),
               p.get("size"), p.get("url"),
               pr["price"], pr.get("regular_price"), pr.get("was_price"),
+              pr.get("member_price"),
               1 if pr.get("on_sale") else 0, pr.get("sale_label"),
               pr.get("min_qty") or 1, 1 if pr.get("in_stock", True) else 0)
              for p, pr in rows],
@@ -305,10 +311,11 @@ def save_batch(rows):
         # Append history only for products whose price/sale state moved.
         conn.executemany(
             """INSERT INTO price_history
-                   (product_id, price, regular_price, was_price,
+                   (product_id, price, regular_price, was_price, member_price,
                     on_sale, sale_label, min_qty, in_stock)
-               VALUES (?,?,?,?,?,?,?,?)""",
+               VALUES (?,?,?,?,?,?,?,?,?)""",
             [(p["product_id"], pr["price"], pr.get("regular_price"), pr.get("was_price"),
+              pr.get("member_price"),
               1 if pr.get("on_sale") else 0, pr.get("sale_label"), pr.get("min_qty") or 1,
               1 if pr.get("in_stock", True) else 0)
              for p, pr in rows if changed(p, pr)],
@@ -367,7 +374,7 @@ def get_product(product_id):
 def get_price_history(product_id):
     with get_conn() as conn:
         rows = conn.execute(
-            """SELECT price, regular_price, on_sale, sale_label, in_stock, scraped_at
+            """SELECT price, regular_price, member_price, on_sale, sale_label, in_stock, scraped_at
                FROM price_history
                WHERE product_id = ?
                ORDER BY scraped_at ASC""",

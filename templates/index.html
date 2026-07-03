@@ -788,6 +788,10 @@ const CHAIN = {
 };
 function storeKey(s) { return `${s.retailer || 'saveon'}_${s.store_id}`; }
 function chainOf(s) { return CHAIN[s.retailer || 'saveon'] || CHAIN.saveon; }
+// loyalty program of the current store's chain (member-only pricing label)
+function memberProgram() {
+  return (currentStoreKey || '').startsWith('saveon') ? 'More Rewards' : 'PC Optimum';
+}
 let currentStoreKey = null;
 
 async function loadCurrentStore() {
@@ -1099,6 +1103,12 @@ function makeProductCard(p, extras = {}) {
     }
   }
 
+  // member-only offer price (e.g. PC Optimum): shown as a labeled extra line,
+  // never as the main price — the shelf price is what the store charges everyone
+  if (p.member_price != null && (price == null || p.member_price < price - 0.001)) {
+    dealLine = `<div class="deal-ln deal">$${p.member_price.toFixed(2)} with ${memberProgram()}</div>`;
+  }
+
   const priceDiff = (p.prev_price != null && price != null) ? price - p.prev_price : null;
   const trendHtml = (priceDiff != null && Math.abs(priceDiff) > 0.001)
     ? `<span class="trend num ${priceDiff > 0 ? 'up' : 'down'}">${priceDiff > 0 ? '▴' : '▾'} $${Math.abs(priceDiff).toFixed(2)}</span>`
@@ -1289,6 +1299,14 @@ async function openModal(productId) {
           <span class="tag tag-ok">More Rewards</span>`;
       }
     }
+    if (latest.member_price != null && latest.member_price < yourPrice - 0.001) {
+      html += `
+        <div style="margin-top:5px; display:flex; gap:8px; align-items:center; flex-wrap:wrap">
+          <span class="num" style="font-weight:700; color:var(--deal)">$${latest.member_price.toFixed(2)}</span>
+          <span class="note">member-only offer</span>
+          <span class="tag tag-ok">${memberProgram()}</span>
+        </div>`;
+    }
     pricingEl.innerHTML = html;
   }
 
@@ -1336,7 +1354,13 @@ function renderNutritionLabel(live) {
   document.getElementById('modal-nutrition-loading').style.display = 'none';
 
   if (!rows.length && !ingredients) {
-    document.getElementById('modal-nutrition-empty').style.display = '';
+    const emptyEl = document.getElementById('modal-nutrition-empty');
+    emptyEl.style.display = '';
+    if (live.external_url) {
+      emptyEl.innerHTML = `Nutrition facts aren't available in the web version.<br>` +
+        `<a href="${escHtml(live.external_url)}" target="_blank" rel="noopener" ` +
+        `style="color:var(--brand-dark); font-weight:600">View this product on the store's website ↗</a>`;
+    }
     return;
   }
   document.getElementById('modal-nutrition-content').style.display = '';
@@ -1455,37 +1479,49 @@ function renderPriceChart(history) {
   });
   const prices   = history.map(h => h.price);
   const regulars = history.map(h => h.regular_price);
+  const members  = history.map(h => h.member_price ?? null);
+
+  const datasets = [
+    {
+      label: 'Price',
+      data: prices,
+      borderColor: '#0e7a3d',
+      backgroundColor: 'rgba(14,122,61,.06)',
+      borderWidth: 2,
+      // dots mark the days the price actually changed; filled days stay clean
+      pointRadius: history.map(h => h.changed === false ? 0 : (h.on_sale ? 4 : 2.5)),
+      pointHoverRadius: 4,
+      pointBackgroundColor: history.map(h => h.on_sale ? '#c8102e' : '#0e7a3d'),
+      stepped: 'before',
+      fill: true,
+    },
+    {
+      label: 'Shelf price',
+      data: regulars,
+      borderColor: '#b9c0c9',
+      borderWidth: 1.5,
+      borderDash: [4,4],
+      pointRadius: 0,
+      stepped: 'before',
+    },
+  ];
+  if (members.some(v => v != null)) {
+    datasets.push({
+      label: memberProgram(),
+      data: members,
+      borderColor: '#c8102e',
+      borderWidth: 1.5,
+      borderDash: [2,3],
+      pointRadius: 0,
+      stepped: 'before',
+      spanGaps: false,
+    });
+  }
 
   const ctx = document.getElementById('price-chart').getContext('2d');
   priceChart = new Chart(ctx, {
     type: 'line',
-    data: {
-      labels,
-      datasets: [
-        {
-          label: 'Your price',
-          data: prices,
-          borderColor: '#0e7a3d',
-          backgroundColor: 'rgba(14,122,61,.06)',
-          borderWidth: 2,
-          // dots mark the days the price actually changed; filled days stay clean
-          pointRadius: history.map(h => h.changed === false ? 0 : (h.on_sale ? 4 : 2.5)),
-          pointHoverRadius: 4,
-          pointBackgroundColor: history.map(h => h.on_sale ? '#c8102e' : '#0e7a3d'),
-          stepped: 'before',
-          fill: true,
-        },
-        {
-          label: 'Shelf price',
-          data: regulars,
-          borderColor: '#b9c0c9',
-          borderWidth: 1.5,
-          borderDash: [4,4],
-          pointRadius: 0,
-          stepped: 'before',
-        },
-      ],
-    },
+    data: { labels, datasets },
     options: {
       responsive: true,
       maintainAspectRatio: false,
@@ -1525,7 +1561,9 @@ function renderHistoryTable(history) {
       <td>${d.toLocaleDateString('en-CA',{month:'short',day:'numeric',year:'numeric'})}</td>
       <td class="r num" style="${priceStyle}">$${h.price.toFixed(2)}</td>
       <td class="r num" style="color:var(--ink-4)">${shelfDisplay}</td>
-      <td>${h.on_sale
+      <td>${h.member_price != null
+        ? `<span class="tag tag-ok num">$${h.member_price.toFixed(2)} ${escHtml(memberProgram())}</span>`
+        : h.on_sale
         ? `<span class="tag ${isConditional ? 'tag-deal' : 'tag-sale'}">${escHtml(h.sale_label || 'SALE')}</span>`
         : ''}</td>
     `;
