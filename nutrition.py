@@ -152,8 +152,11 @@ def _cache_conn(retailer):
     return conn
 
 
-def backfill(retailer, store_id, product_ids, budget=3000, workers=12):
-    """Fetches facts for up to `budget` uncached products. Returns fetch count."""
+def backfill(retailer, store_id, product_ids, budget=3000, workers=12, delay=0.0):
+    """Fetches facts for up to `budget` uncached products. Returns fetch count.
+    `delay` adds a per-worker pause between requests — the Loblaw detail
+    endpoint bans IPs that fetch too aggressively."""
+    import time as _time
     conn = _cache_conn(retailer)
     have = {r[0] for r in conn.execute("SELECT product_id FROM facts")}
     todo = [p for p in product_ids if p not in have][:budget]
@@ -161,8 +164,9 @@ def backfill(retailer, store_id, product_ids, budget=3000, workers=12):
         conn.close()
         return 0
 
-    fetch = (lambda pid: _fetch_saveon(store_id, pid)) if retailer == "saveon" \
+    base = (lambda pid: _fetch_saveon(store_id, pid)) if retailer == "saveon" \
         else (lambda pid: _fetch_loblaw(retailer, store_id, pid))
+    fetch = (lambda pid: (_time.sleep(delay), base(pid))[1]) if delay else base
 
     done = 0
     with ThreadPoolExecutor(max_workers=workers) as ex:
