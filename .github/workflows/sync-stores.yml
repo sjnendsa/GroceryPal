@@ -42,6 +42,14 @@ jobs:
           git add data docs
           if ! git diff --cached --quiet; then
             git commit -m "Scheduled price sync"
-            git pull --rebase origin main
-            git push
+            # Other bots (export-docs, build-exe) also commit to main; on a
+            # conflict in generated files our fresh scrape wins (-X theirs =
+            # the replayed commit during a rebase). Retry a few times in case
+            # main moves again between rebase and push.
+            for i in 1 2 3 4; do
+              git fetch origin main
+              git rebase -X theirs origin/main || { git rebase --abort; sleep 15; continue; }
+              git push && break
+              sleep 15
+            done
           fi
