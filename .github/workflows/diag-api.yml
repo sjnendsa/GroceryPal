@@ -12,32 +12,23 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Python (requests) probe — same code path as the sync
+      - name: Full catalog iteration — same code path as the sync
         run: |
           pip install -q requests
-          pip show requests urllib3 | grep -E '^(Name|Version)'
+          curl -s ifconfig.me; echo " <- egress IP"
           python - <<'EOF'
-          import json, requests, uuid
+          import time
           import loblaw
 
-          # 1. raw POST, term search (mirrors the curl that worked)
-          sess = requests.Session()
-          data, total = loblaw._search_page(sess, "nofrills", "3633", "28000", 1)
-          print("category search via loblaw._search_page:", "OK" if data else "FAILED", "| results:", total)
+          cats = loblaw.fetch_leaf_categories("nofrills")
+          print("cats:", len(cats), "| with children:", sum(1 for c in cats if c.get("children")))
 
-          # 2. raw request with status visibility
-          body = {
-            "cart": {"cartId": str(uuid.uuid4())},
-            "fulfillmentInfo": {"storeId": "3633", "pickupType": "STORE", "offerType": "OG", "date": "", "timeSlot": None},
-            "listingInfo": {"filters": {"category": ["28000"]}, "sort": {},
-                            "pagination": {"from": 1}, "includeFiltersInResponse": False},
-            "banner": "nofrills",
-            "userData": {"domainUserId": str(uuid.uuid4()), "sessionId": str(uuid.uuid4())},
-            "device": {"screenSize": 1358},
-            "searchRelatedInfo": {"term": "", "options": [{"name": "rmp.unifiedSearchVariant", "value": "Y"}]},
-          }
-          r = requests.post(f"{loblaw.API}/api/v2/products/search",
-                            headers=loblaw._headers("nofrills"), json=body, timeout=25)
-          print("raw status:", r.status_code)
-          print("raw body head:", r.text[:200].replace("\n", " "))
+          cat, tiles, overflow = loblaw._fetch_category("nofrills", "3633", cats[0])
+          print("cat0", cat["id"], "-> tiles:", len(tiles), "overflow children:", len(overflow or []))
+
+          t0 = time.time()
+          n = 0
+          for prod, price in loblaw.iter_catalog("nofrills", "3633", cats):
+              n += 1
+          print(f"full catalog iterated: {n} products in {time.time()-t0:.0f}s")
           EOF
