@@ -14,7 +14,11 @@
         const s = document.createElement('script');
         s.src = 'data/' + key + '.js';
         s.onload = res;
-        s.onerror = rej;
+        s.onerror = () => {   // flaky connection: forget the failure so the next
+          s.remove();         // view change / retry re-attempts the download
+          delete pending[key];
+          rej(new Error('failed to load ' + key));
+        };
         document.head.appendChild(s);
       });
     }
@@ -180,9 +184,15 @@
     }
   };
 
-  // make the Sync button explain itself instead of pretending to scrape
+  // static site refreshes itself daily — the manual sync button has no job here
   document.addEventListener('DOMContentLoaded', () => {
     const b = document.getElementById('scrape-btn');
-    if (b) { b.onclick = () => alert(SYNC_MSG); }
+    if (b) b.style.display = 'none';
+    if (typeof VIEW_TITLES !== 'undefined') {
+      VIEW_TITLES.products[1] = 'Full catalog, refreshed automatically every morning';
+      VIEW_TITLES.history[1] = 'Automatic daily refresh runs and results';
+    }
+    const sub = document.getElementById('page-sub');
+    if (sub) sub.textContent = 'Full catalog, refreshed automatically every morning';
   });
 })();
