@@ -16,6 +16,7 @@ import nutrition
 
 def main():
     fetched = 0
+    # nofrills first: its block cools slowest, so give it the earliest requests
     for retailer in ("nofrills", "superstore", "saveon"):
         store = nutrition.a_store_of(retailer)
         if not store:
