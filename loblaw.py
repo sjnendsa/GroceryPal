@@ -21,7 +21,9 @@ Save-On scraper uses, so db.save_batch and the dashboard work unchanged.
 import json
 import logging
 import os
+import random
 import re
+import threading
 import time
 import uuid
 
@@ -45,7 +47,39 @@ BANNER_LABEL = {"superstore": "Real Canadian Superstore", "nofrills": "No Frills
 
 PAGE_SIZE = 48          # tiles per response
 PAGE_CAP = 960          # API rejects pagination.from > ~960
-RATE_LIMIT_DELAY = 0.05
+RATE_LIMIT_DELAY = 0.25
+WORKERS = 6             # 16 workers @ 0.05s tripped Akamai's rate limits (Jul 2026)
+
+# When Akamai denies a request (HTTP 403 "Access Denied") the whole runner IP
+# is blocked for a while — observed to last 70s+ on GitHub runners. Hammering
+# through the block just prolongs it, so ALL workers share one cool-down gate:
+# any 403 pauses everyone, then the page is retried with escalating waits.
+BLOCK_COOLDOWNS = (60, 120, 240)   # seconds; give up after these retries
+_block_lock = threading.Lock()
+_block_until = 0.0
+_gave_up = False    # once a page outlasts every cool-down, stop stalling the run
+
+
+def _note_block(seconds):
+    global _block_until
+    with _block_lock:
+        _block_until = max(_block_until, time.time() + seconds)
+
+
+def reset_block():
+    """Forget a previous block so a later retry pass gets a fresh chance."""
+    global _block_until, _gave_up
+    with _block_lock:
+        _block_until = 0.0
+        _gave_up = False
+
+
+def _wait_out_block():
+    while True:
+        wait = _block_until - time.time()
+        if wait <= 0:
+            return
+        time.sleep(min(wait, 5))
 
 
 def _headers(banner):
@@ -257,17 +291,29 @@ def _search_page(session, banner, store_id, category_id, frm):
         "device": {"screenSize": 1358},
         "searchRelatedInfo": {"term": "", "options": [{"name": "rmp.unifiedSearchVariant", "value": "Y"}]},
     }
-    try:
-        r = session.post(f"{API}/api/v2/products/search", headers=_headers(banner),
-                         json=body, timeout=25)
-        if r.status_code != 200:
-            log.warning(f"search cat={category_id} page={frm}: HTTP {r.status_code} {r.text[:120]!r}")
+    global _gave_up
+    cooldowns = (() if _gave_up else BLOCK_COOLDOWNS) + (None,)
+    for cooldown in cooldowns:
+        _wait_out_block()
+        try:
+            r = session.post(f"{API}/api/v2/products/search", headers=_headers(banner),
+                             json=body, timeout=25)
+            if r.status_code == 403 and cooldown is not None:
+                log.warning(f"search cat={category_id} page={frm}: HTTP 403 — "
+                            f"blocked, cooling down {cooldown}s")
+                _note_block(cooldown)
+                continue
+            if r.status_code != 200:
+                if r.status_code == 403 and cooldown is None and cooldowns != (None,):
+                    _gave_up = True   # block outlasted every cool-down
+                log.warning(f"search cat={category_id} page={frm}: HTTP {r.status_code} {r.text[:120]!r}")
+                return None, 0
+            d = r.json()
+            return d, int(d.get("searchResultsCount") or 0)
+        except (requests.RequestException, ValueError) as e:
+            log.warning(f"search cat={category_id} page={frm}: {e}")
             return None, 0
-        d = r.json()
-        return d, int(d.get("searchResultsCount") or 0)
-    except (requests.RequestException, ValueError) as e:
-        log.warning(f"search cat={category_id} page={frm}: {e}")
-        return None, 0
+    return None, 0
 
 
 def _fetch_category(banner, store_id, cat):
@@ -291,11 +337,11 @@ def _fetch_category(banner, store_id, cat):
         if len(tiles) >= total or page * PAGE_SIZE >= total:
             break
         page += 1
-        time.sleep(RATE_LIMIT_DELAY)
+        time.sleep(RATE_LIMIT_DELAY + random.uniform(0, 0.15))
     return cat, tiles, None
 
 
-def iter_catalog(banner, store_id, categories, on_page=None, workers=16):
+def iter_catalog(banner, store_id, categories, on_page=None, workers=WORKERS):
     """Yields normalised (product, price) for the whole catalog, deduped.
     Categories are fetched in parallel; on_page(done, total, count) reports progress."""
     from concurrent.futures import ThreadPoolExecutor, as_completed
