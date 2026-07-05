@@ -5,6 +5,7 @@ but works the same locally:  python sync_all.py
 import glob
 import os
 import re
+import time
 
 import db
 import scraper
@@ -37,6 +38,27 @@ def main():
         except Exception as e:
             print(f"  FAILED: {e}", flush=True)
             failed.append(key)
+
+    # Loblaw failures are almost always Akamai blocking the runner IP for a
+    # while, not a broken store — give the block time to lift, then retry
+    # those stores once before declaring the run red.
+    blocked = [k for k in failed if not k.startswith("saveon_")]
+    if blocked:
+        import loblaw
+        print(f"retrying {len(blocked)} blocked store(s) after cool-down...", flush=True)
+        time.sleep(300)
+        loblaw.reset_block()
+        for key in blocked:
+            retailer, sid = key.rsplit("_", 1)
+            print(f"=== {key} (retry) ===", flush=True)
+            try:
+                if _scrape_loblaw(retailer, sid, key):
+                    failed.remove(key)
+                else:
+                    print("  FAILED: scraped 0 products", flush=True)
+            except Exception as e:
+                print(f"  FAILED: {e}", flush=True)
+
     # Top up the nutrition caches for products that appeared since the last
     # run (facts are fetched once per product, then baked into docs/).
     import nutrition
