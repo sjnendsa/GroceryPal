@@ -120,8 +120,15 @@ def export_index():
     with open(os.path.join(BASE, "templates", "index.html"), encoding="utf-8") as f:
         html = f.read()
     inject = ('<script src="data/stores.js"></script>\n'
-              '<script src="static_api.js"></script>\n</body>')
+              '<script src="static_api.js"></script>\n'
+              "<script>if ('serviceWorker' in navigator) "
+              "navigator.serviceWorker.register('sw.js');</script>\n</body>")
     html = html.replace("</body>", inject, 1)
+    # installable app (home screen on iOS/Android) — the PWA files live in docs/
+    head = ('<link rel="manifest" href="manifest.webmanifest"/>\n'
+            '<link rel="apple-touch-icon" href="icons/apple-touch-icon.png"/>\n'
+            '<link rel="icon" type="image/png" href="icons/favicon-32.png"/>\n</head>')
+    html = html.replace("</head>", head, 1)
     with open(os.path.join(DOCS, "index.html"), "w", encoding="utf-8") as f:
         f.write(html)
 
